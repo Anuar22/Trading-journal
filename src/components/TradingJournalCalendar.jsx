@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   CalendarDays,
@@ -16,6 +16,11 @@ import {
   Sun,
   Target,
   NotebookPen,
+  ImagePlus,
+  Upload,
+  Flame,
+  Trophy,
+  Activity,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,13 +32,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const STORAGE_KEY = "trading-journal-calendar-v1";
+const STORAGE_KEY = "trading-journal-pro-v2";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const strategies = ["London breakout", "NY reversal", "Liquidity sweep", "Trend continuation", "Scalp", "Range fade"];
 
 const defaultForm = (date = new Date().toISOString().slice(0, 10)) => ({
   id: "",
@@ -49,6 +55,7 @@ const defaultForm = (date = new Date().toISOString().slice(0, 10)) => ({
   session: "london",
   confidence: "3",
   grade: "A",
+  screenshot: "",
   note: "",
 });
 
@@ -71,13 +78,10 @@ function getMonthGrid(date) {
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const prevMonthDays = new Date(year, month, 0).getDate();
-
   const cells = [];
+
   for (let i = firstDay - 1; i >= 0; i--) {
-    cells.push({
-      date: new Date(year, month - 1, prevMonthDays - i),
-      currentMonth: false,
-    });
+    cells.push({ date: new Date(year, month - 1, prevMonthDays - i), currentMonth: false });
   }
   for (let day = 1; day <= daysInMonth; day++) {
     cells.push({ date: new Date(year, month, day), currentMonth: true });
@@ -89,7 +93,63 @@ function getMonthGrid(date) {
   return cells;
 }
 
+function getHeatLevel(dayPnl) {
+  if (dayPnl >= 300) return "strong-green";
+  if (dayPnl > 0) return "green";
+  if (dayPnl <= -300) return "strong-red";
+  if (dayPnl < 0) return "red";
+  return "neutral";
+}
+
+function getCurrentStreak(trades) {
+  const sorted = [...trades].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const daily = new Map();
+  for (const t of sorted) {
+    daily.set(t.date, (daily.get(t.date) || 0) + Number(t.pnl || 0));
+  }
+  const days = [...daily.entries()].sort((a, b) => new Date(a[0]) - new Date(b[0]));
+  let streak = 0;
+  let type = null;
+  for (let i = days.length - 1; i >= 0; i--) {
+    const pnl = days[i][1];
+    const currentType = pnl >= 0 ? "win" : "loss";
+    if (!type) type = currentType;
+    if (currentType === type) streak += 1;
+    else break;
+  }
+  return { streak, type };
+}
+
+function Sparkline({ points, positive = true }) {
+  if (!points.length) return <div className="h-24 w-full rounded-2xl border border-dashed border-white/10" />;
+  const width = 520;
+  const height = 110;
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const range = max - min || 1;
+  const path = points
+    .map((p, i) => {
+      const x = (i / Math.max(points.length - 1, 1)) * (width - 16) + 8;
+      const y = height - ((p - min) / range) * (height - 16) - 8;
+      return `${i === 0 ? "M" : "L"}${x},${y}`;
+    })
+    .join(" ");
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="h-28 w-full overflow-visible">
+      <defs>
+        <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={positive ? "rgba(74,222,128,0.35)" : "rgba(251,113,133,0.35)"} />
+          <stop offset="100%" stopColor="rgba(255,255,255,0)" />
+        </linearGradient>
+      </defs>
+      <path d={path} fill="none" stroke={positive ? "#4ade80" : "#fb7185"} strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export default function TradingJournalCalendar() {
+  const fileInputRef = useRef(null);
   const [dark, setDark] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
@@ -99,24 +159,61 @@ export default function TradingJournalCalendar() {
   const [trades, setTrades] = useState(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [
-        {
-          id: crypto.randomUUID(),
-          date: new Date().toISOString().slice(0, 10),
-          pair: "XAUUSD",
-          direction: "buy",
-          entry: "2335.40",
-          exit: "2342.10",
-          lotSize: "0.50",
-          riskPercent: "1",
-          pnl: "185.40",
-          strategy: "London breakout",
-          session: "london",
-          confidence: "4",
-          grade: "A",
-          note: "Clean structure break with confirmation candle.",
-        },
-      ];
+      return raw
+        ? JSON.parse(raw)
+        : [
+            {
+              id: crypto.randomUUID(),
+              date: new Date().toISOString().slice(0, 10),
+              pair: "XAUUSD",
+              direction: "buy",
+              entry: "2335.40",
+              exit: "2342.10",
+              lotSize: "0.50",
+              riskPercent: "1",
+              pnl: "185.40",
+              strategy: "London breakout",
+              session: "london",
+              confidence: "4",
+              grade: "A",
+              screenshot: "",
+              note: "Clean structure break with confirmation candle.",
+            },
+            {
+              id: crypto.randomUUID(),
+              date: new Date(Date.now() - 86400000).toISOString().slice(0, 10),
+              pair: "GBPUSD",
+              direction: "sell",
+              entry: "1.2840",
+              exit: "1.2816",
+              lotSize: "1.00",
+              riskPercent: "1",
+              pnl: "240.00",
+              strategy: "Liquidity sweep",
+              session: "new-york",
+              confidence: "5",
+              grade: "A",
+              screenshot: "",
+              note: "Took sell after sweep and displacement.",
+            },
+            {
+              id: crypto.randomUUID(),
+              date: new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10),
+              pair: "NAS100",
+              direction: "buy",
+              entry: "18240",
+              exit: "18188",
+              lotSize: "0.20",
+              riskPercent: "1",
+              pnl: "-92.00",
+              strategy: "Trend continuation",
+              session: "london",
+              confidence: "2",
+              grade: "C",
+              screenshot: "",
+              note: "Entered too early before reclaim.",
+            },
+          ];
     } catch {
       return [];
     }
@@ -173,6 +270,37 @@ export default function TradingJournalCalendar() {
 
   const monthlyPnl = monthlyTrades.reduce((sum, t) => sum + Number(t.pnl || 0), 0);
 
+  const equitySeries = useMemo(() => {
+    const sorted = [...trades].sort((a, b) => new Date(a.date) - new Date(b.date));
+    let running = 0;
+    return sorted.map((trade) => {
+      running += Number(trade.pnl || 0);
+      return running;
+    });
+  }, [trades]);
+
+  const strategyStats = useMemo(() => {
+    const map = new Map();
+    for (const t of trades) {
+      const key = t.strategy || "Uncategorized";
+      if (!map.has(key)) map.set(key, { name: key, count: 0, pnl: 0, wins: 0 });
+      const item = map.get(key);
+      item.count += 1;
+      item.pnl += Number(t.pnl || 0);
+      if (Number(t.pnl) > 0) item.wins += 1;
+    }
+    return [...map.values()].sort((a, b) => b.pnl - a.pnl);
+  }, [trades]);
+
+  const currentStreak = useMemo(() => getCurrentStreak(trades), [trades]);
+  const bestDay = useMemo(() => {
+    const entries = Object.entries(byDate).map(([date, dayTrades]) => ({
+      date,
+      pnl: dayTrades.reduce((sum, t) => sum + Number(t.pnl || 0), 0),
+    }));
+    return entries.sort((a, b) => b.pnl - a.pnl)[0];
+  }, [byDate]);
+
   function updateForm(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
@@ -207,33 +335,38 @@ export default function TradingJournalCalendar() {
     setTrades((prev) => prev.filter((t) => t.id !== id));
   }
 
+  function handleScreenshotUpload(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      updateForm("screenshot", String(reader.result));
+    };
+    reader.readAsDataURL(file);
+  }
+
   return (
-    <div className={cls(
-      "min-h-screen w-full transition-colors",
-      dark
-        ? "bg-[#0a0d16] text-white"
-        : "bg-slate-50 text-slate-900"
-    )}>
+    <div className={cls("min-h-screen w-full transition-colors", dark ? "bg-[#070a12] text-white" : "bg-slate-50 text-slate-900")}>
       <div className="mx-auto max-w-7xl p-4 md:p-6">
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           className={cls(
-            "mb-6 overflow-hidden rounded-3xl border p-6 shadow-2xl",
+            "mb-6 overflow-hidden rounded-[28px] border p-6 shadow-2xl",
             dark
-              ? "border-white/10 bg-gradient-to-br from-[#0f1425] via-[#121931] to-[#19133a]"
+              ? "border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(34,197,94,0.18),transparent_25%),radial-gradient(circle_at_top_left,rgba(59,130,246,0.18),transparent_25%),linear-gradient(135deg,#0d1220,#121a31,#18152f)]"
               : "border-slate-200 bg-gradient-to-br from-white via-slate-50 to-slate-100"
           )}
         >
           <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium tracking-wide text-blue-400 border-blue-400/20 bg-blue-400/10">
-                <CalendarDays className="h-4 w-4" />
-                Trading Journal Calendar
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-medium tracking-wide text-emerald-300">
+                <Flame className="h-4 w-4" />
+                Prop-Firm Style Journal
               </div>
-              <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Track every trade. See every pattern.</h1>
+              <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Trade review with a funded-dashboard feel.</h1>
               <p className={cls("mt-2 max-w-2xl text-sm md:text-base", dark ? "text-slate-300" : "text-slate-600")}>
-                A sleek calendar-style trading journal inspired by modern prop dashboards. Log trades, review daily performance, and build consistency.
+                Log every setup, track your equity, review strategy performance, and build a visual heatmap of your trading discipline.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -256,7 +389,7 @@ export default function TradingJournalCalendar() {
                     <Plus className="mr-2 h-4 w-4" /> Add Trade
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
                   <DialogHeader>
                     <DialogTitle>{form.id ? "Edit Trade" : "New Trade Entry"}</DialogTitle>
                   </DialogHeader>
@@ -312,18 +445,23 @@ export default function TradingJournalCalendar() {
                     </div>
                     <div>
                       <Label>Strategy</Label>
-                      <Input value={form.strategy} onChange={(e) => updateForm("strategy", e.target.value)} placeholder="London breakout" />
+                      <Select value={form.strategy || undefined} onValueChange={(v) => updateForm("strategy", v)}>
+                        <SelectTrigger><SelectValue placeholder="Select strategy" /></SelectTrigger>
+                        <SelectContent>
+                          {strategies.map((strategy) => (
+                            <SelectItem key={strategy} value={strategy}>{strategy}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div>
                       <Label>Confidence (1-5)</Label>
                       <Select value={form.confidence} onValueChange={(v) => updateForm("confidence", v)}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="1">1</SelectItem>
-                          <SelectItem value="2">2</SelectItem>
-                          <SelectItem value="3">3</SelectItem>
-                          <SelectItem value="4">4</SelectItem>
-                          <SelectItem value="5">5</SelectItem>
+                          {["1", "2", "3", "4", "5"].map((v) => (
+                            <SelectItem key={v} value={v}>{v}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -332,12 +470,26 @@ export default function TradingJournalCalendar() {
                       <Select value={form.grade} onValueChange={(v) => updateForm("grade", v)}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="A">A</SelectItem>
-                          <SelectItem value="B">B</SelectItem>
-                          <SelectItem value="C">C</SelectItem>
-                          <SelectItem value="D">D</SelectItem>
+                          {["A", "B", "C", "D"].map((v) => (
+                            <SelectItem key={v} value={v}>{v}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
+                    </div>
+                    <div className="md:col-span-2">
+                      <Label>Screenshot</Label>
+                      <div className="mt-2 flex flex-col gap-3 md:flex-row md:items-center">
+                        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleScreenshotUpload} />
+                        <Button type="button" variant="outline" className="rounded-2xl" onClick={() => fileInputRef.current?.click()}>
+                          <Upload className="mr-2 h-4 w-4" /> Upload Screenshot
+                        </Button>
+                        {form.screenshot && <Badge variant="secondary">Image attached</Badge>}
+                      </div>
+                      {form.screenshot && (
+                        <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
+                          <img src={form.screenshot} alt="Trade screenshot" className="h-48 w-full object-cover" />
+                        </div>
+                      )}
                     </div>
                     <div className="md:col-span-2">
                       <Label>Notes</Label>
@@ -354,33 +506,58 @@ export default function TradingJournalCalendar() {
           </div>
         </motion.div>
 
+        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
+          {[
+            { title: "Total PnL", value: formatMoney(stats.pnl), icon: DollarSign, tone: stats.pnl >= 0 ? "text-emerald-400" : "text-rose-400" },
+            { title: "Win Rate", value: `${stats.winRate.toFixed(0)}%`, icon: Target, tone: "text-blue-400" },
+            { title: "Trades", value: stats.total, icon: BarChart3, tone: "text-violet-400" },
+            { title: "Streak", value: `${currentStreak.streak || 0} ${currentStreak.type || "days"}`, icon: Trophy, tone: currentStreak.type === "win" ? "text-emerald-400" : "text-rose-400" },
+            { title: "Best Day", value: bestDay ? formatMoney(bestDay.pnl) : "$0.00", icon: Activity, tone: "text-amber-400" },
+          ].map((item) => (
+            <Card key={item.title} className={cls("rounded-3xl border shadow-xl", dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white")}>
+              <CardContent className="p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <span className={cls("text-xs", dark ? "text-slate-400" : "text-slate-500")}>{item.title}</span>
+                  <item.icon className={cls("h-4 w-4", item.tone)} />
+                </div>
+                <div className={cls("text-xl font-semibold", item.tone)}>{item.value}</div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
           <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                { title: "Total PnL", value: formatMoney(stats.pnl), icon: DollarSign },
-                { title: "Win Rate", value: `${stats.winRate.toFixed(0)}%`, icon: Target },
-                { title: "Trades", value: stats.total, icon: BarChart3 },
-                { title: "Avg Trade", value: formatMoney(stats.avg), icon: NotebookPen },
-              ].map((item) => (
-                <Card key={item.title} className={cls("rounded-3xl border shadow-xl", dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white")}>
-                  <CardContent className="p-4">
-                    <div className="mb-3 flex items-center justify-between">
-                      <span className={cls("text-xs", dark ? "text-slate-400" : "text-slate-500")}>{item.title}</span>
-                      <item.icon className="h-4 w-4 text-blue-400" />
+            <Card className={cls("rounded-3xl border shadow-xl", dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white")}>
+              <CardHeader>
+                <CardTitle className="text-base">Calendar Heatmap</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    ["bg-emerald-500/15 border-emerald-500/30", "Green day"],
+                    ["bg-emerald-500/30 border-emerald-500/40", "Strong green"],
+                    ["bg-rose-500/15 border-rose-500/30", "Red day"],
+                    ["bg-rose-500/30 border-rose-500/40", "Strong red"],
+                  ].map(([style, label]) => (
+                    <div key={label} className="flex items-center gap-2 rounded-2xl border border-white/10 p-2">
+                      <div className={cls("h-4 w-4 rounded-md border", style)} />
+                      <span className={cls(dark ? "text-slate-300" : "text-slate-600")}>{label}</span>
                     </div>
-                    <div className="text-xl font-semibold">{item.value}</div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                  ))}
+                </div>
+                <p className={cls(dark ? "text-slate-400" : "text-slate-500")}>
+                  Bigger profits create a stronger heatmap tint, so you can spot your best and worst days instantly.
+                </p>
+              </CardContent>
+            </Card>
 
             <Card className={cls("rounded-3xl border shadow-xl", dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white")}>
               <CardHeader>
                 <CardTitle className="text-base">This Month</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center justify-between rounded-2xl border p-4 border-emerald-500/20 bg-emerald-500/10">
+                <div className="flex items-center justify-between rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
                   <div>
                     <div className="text-xs text-slate-400">Monthly PnL</div>
                     <div className={cls("text-2xl font-bold", monthlyPnl >= 0 ? "text-emerald-400" : "text-rose-400")}>{formatMoney(monthlyPnl)}</div>
@@ -388,17 +565,17 @@ export default function TradingJournalCalendar() {
                   {monthlyPnl >= 0 ? <TrendingUp className="h-6 w-6 text-emerald-400" /> : <TrendingDown className="h-6 w-6 text-rose-400" />}
                 </div>
                 <div className="grid grid-cols-3 gap-3 text-center">
-                  <div className={cls("rounded-2xl p-3", dark ? "bg-white/5" : "bg-slate-50")}> 
+                  <div className={cls("rounded-2xl p-3", dark ? "bg-white/5" : "bg-slate-50")}>
                     <div className="text-xs text-slate-400">Wins</div>
                     <div className="mt-1 text-lg font-semibold text-emerald-400">{stats.wins}</div>
                   </div>
-                  <div className={cls("rounded-2xl p-3", dark ? "bg-white/5" : "bg-slate-50")}> 
+                  <div className={cls("rounded-2xl p-3", dark ? "bg-white/5" : "bg-slate-50")}>
                     <div className="text-xs text-slate-400">Losses</div>
                     <div className="mt-1 text-lg font-semibold text-rose-400">{stats.losses}</div>
                   </div>
-                  <div className={cls("rounded-2xl p-3", dark ? "bg-white/5" : "bg-slate-50")}> 
-                    <div className="text-xs text-slate-400">Days</div>
-                    <div className="mt-1 text-lg font-semibold">{Object.keys(byDate).length}</div>
+                  <div className={cls("rounded-2xl p-3", dark ? "bg-white/5" : "bg-slate-50")}>
+                    <div className="text-xs text-slate-400">Avg Trade</div>
+                    <div className="mt-1 text-lg font-semibold">{formatMoney(stats.avg)}</div>
                   </div>
                 </div>
               </CardContent>
@@ -410,10 +587,10 @@ export default function TradingJournalCalendar() {
               </CardHeader>
               <CardContent>
                 <ul className={cls("space-y-3 text-sm", dark ? "text-slate-300" : "text-slate-600")}>
-                  <li>• Green day cells show profitable trading days.</li>
-                  <li>• Red day cells show losing days.</li>
-                  <li>• Click any day to review entries.</li>
-                  <li>• Data is saved in local storage in this browser.</li>
+                  <li>• Click any day to review all trades.</li>
+                  <li>• Upload chart screenshots for post-analysis.</li>
+                  <li>• Strategy table helps you spot what is really paying you.</li>
+                  <li>• Equity curve shows whether your execution is becoming more consistent.</li>
                 </ul>
               </CardContent>
             </Card>
@@ -444,29 +621,37 @@ export default function TradingJournalCalendar() {
                     const dayPnl = dayTrades.reduce((sum, t) => sum + Number(t.pnl || 0), 0);
                     const isSelected = selectedDate === iso;
                     const isToday = iso === new Date().toISOString().slice(0, 10);
+                    const level = getHeatLevel(dayPnl);
+                    const heatStyle = {
+                      "strong-green": "bg-emerald-500/30 border-emerald-500/35",
+                      green: "bg-emerald-500/15 border-emerald-500/25",
+                      "strong-red": "bg-rose-500/30 border-rose-500/35",
+                      red: "bg-rose-500/15 border-rose-500/25",
+                      neutral: dark ? "bg-white/[0.04] border-white/10" : "bg-slate-50 border-slate-200",
+                    }[level];
+
                     return (
                       <motion.button
                         whileHover={{ y: -2 }}
                         key={iso}
                         onClick={() => setSelectedDate(iso)}
                         className={cls(
-                          "min-h-[104px] rounded-2xl border p-3 text-left transition",
+                          "min-h-[110px] rounded-2xl border p-3 text-left transition",
+                          heatStyle,
                           !inMonth && "opacity-40",
                           isSelected && "ring-2 ring-blue-500",
-                          dark ? "border-white/10 bg-white/[0.04] hover:bg-white/[0.08]" : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                          dark ? "hover:bg-white/[0.08]" : "hover:bg-slate-100"
                         )}
                       >
                         <div className="mb-2 flex items-center justify-between">
                           <span className={cls("text-sm font-semibold", isToday && "text-blue-400")}>{date.getDate()}</span>
-                          {dayTrades.length > 0 && (
-                            <Badge variant="secondary" className="rounded-full">{dayTrades.length}</Badge>
-                          )}
+                          {dayTrades.length > 0 && <Badge variant="secondary" className="rounded-full">{dayTrades.length}</Badge>}
                         </div>
                         {dayTrades.length > 0 ? (
                           <div className="space-y-2">
                             <div className={cls(
                               "rounded-xl px-2 py-1 text-xs font-medium",
-                              dayPnl >= 0 ? "bg-emerald-500/15 text-emerald-400" : "bg-rose-500/15 text-rose-400"
+                              dayPnl >= 0 ? "bg-emerald-500/20 text-emerald-300" : "bg-rose-500/20 text-rose-300"
                             )}>
                               {dayPnl >= 0 ? "+" : ""}{formatMoney(dayPnl)}
                             </div>
@@ -474,7 +659,7 @@ export default function TradingJournalCalendar() {
                               {dayTrades.slice(0, 2).map((trade) => (
                                 <span key={trade.id} className={cls(
                                   "rounded-full px-2 py-0.5 text-[10px]",
-                                  trade.direction === "buy" ? "bg-blue-500/15 text-blue-400" : "bg-amber-500/15 text-amber-400"
+                                  trade.direction === "buy" ? "bg-blue-500/15 text-blue-300" : "bg-amber-500/15 text-amber-300"
                                 )}>
                                   {trade.pair}
                                 </span>
@@ -490,6 +675,52 @@ export default function TradingJournalCalendar() {
                 </div>
               </CardContent>
             </Card>
+
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <Card className={cls("rounded-3xl border shadow-xl", dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white")}>
+                <CardHeader>
+                  <CardTitle className="text-lg">Equity Curve</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="mb-4 flex items-end justify-between">
+                    <div>
+                      <div className="text-xs text-slate-400">Running Equity</div>
+                      <div className={cls("text-2xl font-bold", stats.pnl >= 0 ? "text-emerald-400" : "text-rose-400")}>{formatMoney(stats.pnl)}</div>
+                    </div>
+                    <Badge variant="secondary">{equitySeries.length} points</Badge>
+                  </div>
+                  <Sparkline points={equitySeries} positive={stats.pnl >= 0} />
+                </CardContent>
+              </Card>
+
+              <Card className={cls("rounded-3xl border shadow-xl", dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white")}>
+                <CardHeader>
+                  <CardTitle className="text-lg">Strategy Analytics</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {strategyStats.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-400">No strategy data yet.</div>
+                  ) : strategyStats.slice(0, 5).map((item) => {
+                    const rate = item.count ? (item.wins / item.count) * 100 : 0;
+                    return (
+                      <div key={item.name} className={cls("rounded-2xl border p-3", dark ? "border-white/10 bg-white/[0.03]" : "border-slate-200 bg-slate-50")}>
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <div>
+                            <div className="font-medium">{item.name}</div>
+                            <div className="text-xs text-slate-400">{item.count} trades</div>
+                          </div>
+                          <div className={cls("text-sm font-semibold", item.pnl >= 0 ? "text-emerald-400" : "text-rose-400")}>{formatMoney(item.pnl)}</div>
+                        </div>
+                        <div className="mb-2 h-2 rounded-full bg-white/10">
+                          <div className="h-2 rounded-full bg-emerald-400" style={{ width: `${Math.max(rate, 6)}%` }} />
+                        </div>
+                        <div className="text-xs text-slate-400">Win rate {rate.toFixed(0)}%</div>
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+            </div>
 
             <Card className={cls("rounded-3xl border shadow-xl", dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white")}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -516,7 +747,7 @@ export default function TradingJournalCalendar() {
                             <div>
                               <div className="flex flex-wrap items-center gap-2">
                                 <h3 className="text-lg font-semibold">{trade.pair}</h3>
-                                <Badge className={cls(trade.direction === "buy" ? "bg-blue-500/15 text-blue-400 hover:bg-blue-500/15" : "bg-amber-500/15 text-amber-400 hover:bg-amber-500/15")}>
+                                <Badge className={cls(trade.direction === "buy" ? "bg-blue-500/15 text-blue-300 hover:bg-blue-500/15" : "bg-amber-500/15 text-amber-300 hover:bg-amber-500/15")}>
                                   {trade.direction.toUpperCase()}
                                 </Badge>
                                 <Badge variant="secondary">{trade.session}</Badge>
@@ -558,6 +789,11 @@ export default function TradingJournalCalendar() {
                               <div className="mt-1 font-medium">{trade.confidence}/5</div>
                             </div>
                           </div>
+                          {trade.screenshot && (
+                            <div className="mt-4 overflow-hidden rounded-2xl border border-white/10">
+                              <img src={trade.screenshot} alt="Trade screenshot" className="h-64 w-full object-cover" />
+                            </div>
+                          )}
                           {trade.note && (
                             <div className={cls("mt-4 rounded-2xl p-4 text-sm", dark ? "bg-white/5 text-slate-300" : "bg-white text-slate-600")}>
                               {trade.note}
@@ -568,7 +804,7 @@ export default function TradingJournalCalendar() {
                     </div>
                   </TabsContent>
                   <TabsContent value="summary">
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
                       <Card className={cls(dark ? "border-white/10 bg-white/[0.03]" : "border-slate-200 bg-slate-50")}>
                         <CardContent className="p-5">
                           <div className="text-xs text-slate-400">Day Total</div>
@@ -587,6 +823,15 @@ export default function TradingJournalCalendar() {
                         <CardContent className="p-5">
                           <div className="text-xs text-slate-400">Best Pair</div>
                           <div className="mt-2 text-2xl font-bold">{selectedTrades[0]?.pair || "-"}</div>
+                        </CardContent>
+                      </Card>
+                      <Card className={cls(dark ? "border-white/10 bg-white/[0.03]" : "border-slate-200 bg-slate-50")}>
+                        <CardContent className="p-5">
+                          <div className="text-xs text-slate-400">Images</div>
+                          <div className="mt-2 flex items-center gap-2 text-2xl font-bold">
+                            <ImagePlus className="h-5 w-5 text-blue-400" />
+                            {selectedTrades.filter((t) => t.screenshot).length}
+                          </div>
                         </CardContent>
                       </Card>
                     </div>
