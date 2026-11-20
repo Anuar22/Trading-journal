@@ -176,42 +176,142 @@ function mapRowToTrade(row) {
   };
 }
 
-function Sparkline({ points, positive = true, dark = true }) {
+function TradingCurveSvg({ points, startingBalance, dark }) {
+  const [hoveredIdx, setHoveredIdx] = useState(null);
+
   if (!points.length) {
     return (
       <div
         className={cls(
-          "flex h-28 w-full items-center justify-center rounded-2xl border border-dashed text-xs",
-          dark ? "border-white/10 text-slate-500" : "border-slate-300 text-slate-400"
+          "flex h-44 w-full items-center justify-center rounded-2xl border border-dashed text-xs",
+          dark ? "border-[#252934] text-[#6b7080]" : "border-slate-300 text-slate-400"
         )}
       >
-        No equity points yet
+        Add trades to render your trading curve
       </div>
     );
   }
-  const width = 520;
-  const height = 110;
-  const min = Math.min(...points);
-  const max = Math.max(...points);
-  const range = max - min || 1;
-  const path = points
-    .map((p, i) => {
-      const x = (i / Math.max(points.length - 1, 1)) * (width - 16) + 8;
-      const y = height - ((p - min) / range) * (height - 16) - 8;
-      return `${i === 0 ? "M" : "L"}${x},${y}`;
-    })
+
+  const width = 680;
+  const height = 175;
+  const padX = 28;
+  const padTop = 18;
+  const padBottom = 26;
+  const plotW = width - padX * 2;
+  const plotH = height - padTop - padBottom;
+
+  const values = points.map((p) => p.balance);
+  const minVal = Math.min(...values, Number(startingBalance || 0));
+  const maxVal = Math.max(...values, Number(startingBalance || 0));
+  const span = maxVal - minVal || 1;
+
+  const coords = points.map((pt, i) => {
+    const x = padX + (i / Math.max(points.length - 1, 1)) * plotW;
+    const y = padTop + (1 - (pt.balance - minVal) / span) * plotH;
+    return { ...pt, x, y };
+  });
+
+  const linePath = coords
+    .map((c, i) => `${i === 0 ? "M" : "L"}${c.x.toFixed(1)},${c.y.toFixed(1)}`)
     .join(" ");
 
+  const areaPath = `${linePath} L${coords[coords.length - 1].x.toFixed(1)},${(padTop + plotH).toFixed(1)} L${coords[0].x.toFixed(1)},${(padTop + plotH).toFixed(1)} Z`;
+
+  const isPositive = points[points.length - 1].balance >= Number(startingBalance || 0);
+  const active = hoveredIdx !== null ? coords[hoveredIdx] : coords[coords.length - 1];
+
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-28 w-full overflow-visible">
-      <path
-        d={path}
-        fill="none"
-        stroke={positive ? "#22c55e" : "#f43f5e"}
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-    </svg>
+    <div className="space-y-2.5">
+      <div
+        className={cls(
+          "flex flex-wrap items-center justify-between gap-2 rounded-2xl border px-3 py-2 text-xs",
+          dark ? "border-[#232732] bg-[#191c24]" : "border-slate-200 bg-slate-50"
+        )}
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="font-bold text-[#2dd4bf]">#{active.index}</span>
+          <span className="font-semibold">{active.pair}</span>
+          <span className="text-[#8e95a6]">{active.date}</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className={cls("font-semibold", active.tradePnl >= 0 ? "text-[#2dd4bf]" : "text-[#fbbf24]")}>
+            Trade: {active.tradePnl >= 0 ? "+" : ""}
+            {formatMoney(active.tradePnl)}
+          </span>
+          <span className="font-bold">Bal: {formatMoney(active.balance)}</span>
+          {active.ddUsd > 0 && (
+            <span className="font-semibold text-[#fbbf24]">DD: -{formatMoney(active.ddUsd)}</span>
+          )}
+        </div>
+      </div>
+
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-44 w-full select-none overflow-visible">
+        <defs>
+          <linearGradient id="tradingCurveStroke" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor={isPositive ? "#14b8a6" : "#d97706"} />
+            <stop offset="100%" stopColor={isPositive ? "#2dd4bf" : "#fbbf24"} />
+          </linearGradient>
+          <linearGradient id="tradingCurveFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={isPositive ? "#14b8a6" : "#f59e0b"} stopOpacity="0.28" />
+            <stop offset="100%" stopColor={isPositive ? "#14b8a6" : "#f59e0b"} stopOpacity="0.0" />
+          </linearGradient>
+        </defs>
+
+        {[0, 0.5, 1].map((ratio) => {
+          const gy = padTop + ratio * plotH;
+          const labelVal = maxVal - ratio * span;
+          return (
+            <g key={ratio}>
+              <line
+                x1={padX}
+                y1={gy}
+                x2={width - padX}
+                y2={gy}
+                stroke={dark ? "#222631" : "#e2e8f0"}
+                strokeDasharray="3 3"
+              />
+              <text x={padX} y={gy - 4} fontSize="9" fill="#8e95a6">
+                {formatMoney(labelVal)}
+              </text>
+            </g>
+          );
+        })}
+
+        <path d={areaPath} fill="url(#tradingCurveFill)" />
+        <path
+          d={linePath}
+          fill="none"
+          stroke="url(#tradingCurveStroke)"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+
+        {coords.map((pt, idx) => {
+          const isTradeWin = pt.tradePnl >= 0;
+          const isHovered = hoveredIdx === idx;
+          return (
+            <g
+              key={pt.id || idx}
+              onMouseEnter={() => setHoveredIdx(idx)}
+              onMouseLeave={() => setHoveredIdx(null)}
+              onClick={() => setHoveredIdx(idx)}
+              className="cursor-pointer"
+            >
+              <circle cx={pt.x} cy={pt.y} r="10" fill="transparent" />
+              <circle
+                cx={pt.x}
+                cy={pt.y}
+                r={isHovered ? 5.5 : 3.2}
+                fill={dark ? "#13151b" : "#ffffff"}
+                stroke={isTradeWin ? "#2dd4bf" : "#fbbf24"}
+                strokeWidth="2.2"
+              />
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }
 
@@ -223,6 +323,11 @@ export default function TradingJournalCalendar() {
   const [dark, setDark] = useState(() => {
     const saved = localStorage.getItem("tz-theme");
     return saved ? saved === "dark" : true;
+  });
+
+  const [startingBalance, setStartingBalance] = useState(() => {
+    const saved = localStorage.getItem("tz-starting-balance");
+    return saved !== null ? Number(saved) : 0;
   });
 
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -243,6 +348,10 @@ export default function TradingJournalCalendar() {
     document.documentElement.classList.toggle("dark", dark);
     localStorage.setItem("tz-theme", dark ? "dark" : "light");
   }, [dark]);
+
+  useEffect(() => {
+    localStorage.setItem("tz-starting-balance", String(startingBalance));
+  }, [startingBalance]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -364,14 +473,50 @@ export default function TradingJournalCalendar() {
 
   const monthlyPnl = monthlyTrades.reduce((sum, t) => sum + Number(t.pnl || 0), 0);
 
-  const equitySeries = useMemo(() => {
+  const curveData = useMemo(() => {
     const sorted = [...filteredTrades].sort((a, b) => a.date.localeCompare(b.date));
-    let running = 0;
-    return sorted.map((trade) => {
-      running += Number(trade.pnl || 0);
-      return running;
+    let cumPnl = 0;
+    let peakBalance = Number(startingBalance || 0);
+    let maxDrawdownUsd = 0;
+    let maxDrawdownPct = 0;
+
+    const points = sorted.map((trade, idx) => {
+      const tradePnl = Number(trade.pnl || 0);
+      cumPnl += tradePnl;
+      const balance = Number(startingBalance || 0) + cumPnl;
+
+      if (balance > peakBalance) {
+        peakBalance = balance;
+      }
+
+      const ddUsd = Math.max(0, peakBalance - balance);
+      const ddPct = peakBalance > 0 ? (ddUsd / peakBalance) * 100 : 0;
+
+      if (ddUsd > maxDrawdownUsd) maxDrawdownUsd = ddUsd;
+      if (ddPct > maxDrawdownPct) maxDrawdownPct = ddPct;
+
+      return {
+        index: idx + 1,
+        id: trade.id,
+        date: trade.date,
+        pair: trade.pair,
+        tradePnl,
+        cumPnl,
+        balance,
+        ddUsd,
+        ddPct,
+      };
     });
-  }, [filteredTrades]);
+
+    const currentBalance = Number(startingBalance || 0) + cumPnl;
+
+    return {
+      points,
+      currentBalance,
+      maxDrawdownUsd,
+      maxDrawdownPct,
+    };
+  }, [filteredTrades, startingBalance]);
 
   const strategyStats = useMemo(() => {
     const map = new Map();
@@ -547,42 +692,52 @@ export default function TradingJournalCalendar() {
   if (!authChecked) return null;
   if (!user) return <AuthGate />;
 
+  const pageBg = dark ? "bg-[#08090c] text-[#f4f6f8]" : "bg-[#f3f5f7] text-[#111318]";
+  const cardTone = dark
+    ? "border-[#222631] bg-[#13151b]/95 shadow-[0_14px_34px_rgba(0,0,0,0.45)]"
+    : "border-[#e2e6ec] bg-white shadow-sm";
+  const subSurface = dark
+    ? "border-[#232732] bg-[#191c24]"
+    : "border-[#e5e9ef] bg-[#f8f9fb]";
   const dialogSurface = dark
-    ? "border-slate-800 bg-[#0d1220] text-slate-100"
-    : "border-slate-200 bg-white text-slate-900";
+    ? "border-[#262b38] bg-[#13151b] text-[#f4f6f8]"
+    : "border-[#dde2ea] bg-white text-[#111318]";
   const fieldSurface = dark
-    ? "border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500"
-    : "border-slate-300 bg-white text-slate-900 placeholder:text-slate-400";
+    ? "border-[#282d3b] bg-[#191c24] text-[#f4f6f8] placeholder:text-[#6e7485]"
+    : "border-[#d6dce5] bg-white text-[#111318] placeholder:text-[#8b92a2]";
   const selectContentSurface = dark
-    ? "border-slate-700 bg-slate-900 text-slate-100"
-    : "border-slate-200 bg-white text-slate-900";
-  const labelTone = dark ? "text-slate-200" : "text-slate-700";
-  const cardTone = dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white";
+    ? "border-[#282d3b] bg-[#191c24] text-[#f4f6f8]"
+    : "border-[#dde2ea] bg-white text-[#111318]";
+  const labelTone = dark ? "text-[#cfd4e0]" : "text-[#374151]";
+  const primaryCta =
+    "bg-[#14b8a6] text-[#071110] hover:bg-[#2dd4bf] font-semibold shadow-[0_0_24px_rgba(20,184,166,0.25)]";
 
   return (
-    <div className={cls("min-h-screen w-full transition-colors", dark ? "bg-[#070a12] text-white" : "bg-slate-100 text-slate-900")}>
+    <div className={cls("min-h-screen w-full transition-colors", pageBg)}>
       <div className="mx-auto max-w-7xl p-3 sm:p-4 md:p-6">
         <div
           className={cls(
-            "mb-5 flex flex-col gap-4 rounded-3xl border p-4 shadow-lg md:flex-row md:items-center md:justify-between md:px-6",
-            dark ? "border-white/10 bg-[#0d1220]" : "border-slate-200 bg-white"
+            "mb-5 flex flex-col gap-4 rounded-3xl border p-4 md:flex-row md:items-center md:justify-between md:px-6",
+            cardTone
           )}
         >
           <div className="flex items-center gap-3">
+            <span className="h-2.5 w-2.5 rounded-full bg-[#2dd4bf] shadow-[0_0_10px_#2dd4bf]" />
             <h1 className="text-xl font-bold tracking-tight md:text-2xl">TradeZellah</h1>
-            <Badge variant="secondary" className="hidden rounded-full sm:inline-flex">
+            <Badge
+              variant="secondary"
+              className={cls(
+                "hidden rounded-full border sm:inline-flex",
+                dark ? "border-[#262b38] bg-[#191c24] text-[#9aa1b2]" : "border-slate-200 bg-slate-100 text-slate-600"
+              )}
+            >
               {user.email}
             </Badge>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div
-              className={cls(
-                "flex items-center gap-2 rounded-2xl border px-3 py-1.5",
-                dark ? "border-white/10 bg-white/5" : "border-slate-300 bg-slate-50"
-              )}
-            >
-              <Search className="h-4 w-4 text-slate-400" />
+            <div className={cls("flex items-center gap-2 rounded-2xl border px-3 py-1.5", fieldSurface)}>
+              <Search className="h-4 w-4 text-[#2dd4bf]" />
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -615,7 +770,7 @@ export default function TradingJournalCalendar() {
             </Select>
 
             <Button onClick={exportCsv} variant="outline" size="sm" className={cls("h-9 rounded-2xl", fieldSurface)}>
-              <Download className="mr-1.5 h-3.5 w-3.5" /> CSV
+              <Download className="mr-1.5 h-3.5 w-3.5 text-[#2dd4bf]" /> CSV
             </Button>
 
             <Button
@@ -625,16 +780,12 @@ export default function TradingJournalCalendar() {
               className={cls("h-9 w-9 rounded-2xl", fieldSurface)}
               title="Toggle theme"
             >
-              {dark ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4" />}
+              {dark ? <Sun className="h-4 w-4 text-[#fbbf24]" /> : <Moon className="h-4 w-4 text-[#0f766e]" />}
             </Button>
 
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
-                <Button
-                  onClick={() => openNewTrade()}
-                  size="sm"
-                  className="h-9 rounded-2xl bg-emerald-500 px-4 font-semibold text-slate-950 hover:bg-emerald-400"
-                >
+                <Button onClick={() => openNewTrade()} size="sm" className={cls("h-9 rounded-2xl px-4", primaryCta)}>
                   <Plus className="mr-1.5 h-4 w-4" /> Add Trade
                 </Button>
               </DialogTrigger>
@@ -647,7 +798,7 @@ export default function TradingJournalCalendar() {
                 </DialogHeader>
 
                 {saveError && (
-                  <div className="rounded-xl border border-rose-500/40 bg-rose-500/15 p-3 text-xs text-rose-400">
+                  <div className="rounded-xl border border-amber-500/40 bg-amber-500/15 p-3 text-xs text-amber-300">
                     {saveError}
                   </div>
                 )}
@@ -809,15 +960,19 @@ export default function TradingJournalCalendar() {
                         className={cls("rounded-2xl", fieldSurface)}
                         onClick={() => fileInputRef.current?.click()}
                       >
-                        <Upload className="mr-2 h-4 w-4" /> Upload Image
+                        <Upload className="mr-2 h-4 w-4 text-[#2dd4bf]" /> Upload Image
                       </Button>
-                      {form.screenshot && <Badge variant="secondary">Attached</Badge>}
+                      {form.screenshot && (
+                        <Badge className="rounded-full bg-[#14b8a6]/20 text-[#2dd4bf] hover:bg-[#14b8a6]/20">
+                          Attached
+                        </Badge>
+                      )}
                     </div>
                     {form.screenshot && (
                       <img
                         src={form.screenshot}
                         alt="Chart preview"
-                        className="mt-2 h-44 w-full rounded-2xl border border-slate-700/40 object-cover"
+                        className="mt-2 h-44 w-full rounded-2xl border border-[#282d3b] object-cover"
                       />
                     )}
                   </div>
@@ -837,12 +992,7 @@ export default function TradingJournalCalendar() {
                   <Button type="button" variant="outline" onClick={() => setOpen(false)} className={cls("rounded-2xl", fieldSurface)}>
                     Cancel
                   </Button>
-                  <Button
-                    type="button"
-                    disabled={saving}
-                    onClick={saveTrade}
-                    className="rounded-2xl bg-emerald-500 font-semibold text-slate-950 hover:bg-emerald-400"
-                  >
+                  <Button type="button" disabled={saving} onClick={saveTrade} className={cls("rounded-2xl", primaryCta)}>
                     {saving ? "Saving..." : "Save"}
                   </Button>
                 </div>
@@ -867,43 +1017,43 @@ export default function TradingJournalCalendar() {
               title: "Net PnL",
               value: formatMoney(stats.pnl),
               icon: DollarSign,
-              tone: stats.pnl >= 0 ? "text-emerald-500" : "text-rose-500",
+              tone: stats.pnl >= 0 ? "text-[#2dd4bf]" : "text-[#f59e0b]",
             },
             {
               title: "Win Rate",
               value: `${stats.winRate.toFixed(0)}%`,
               icon: Target,
-              tone: "text-blue-500",
+              tone: "text-[#2dd4bf]",
             },
             {
               title: "Profit Factor",
               value: stats.profitFactor === Infinity ? "∞" : stats.profitFactor.toFixed(2),
               icon: Scale,
-              tone: stats.profitFactor >= 1.5 ? "text-emerald-500" : "text-amber-500",
+              tone: stats.profitFactor >= 1.5 ? "text-[#2dd4bf]" : "text-[#fbbf24]",
             },
             {
               title: "Trades",
               value: loadingTrades ? "…" : stats.total,
               icon: BarChart3,
-              tone: "text-violet-500",
+              tone: dark ? "text-[#f4f6f8]" : "text-[#111318]",
             },
             {
               title: "Streak",
               value: `${currentStreak.streak || 0} ${currentStreak.type || ""}`.trim(),
               icon: Trophy,
-              tone: currentStreak.type === "win" ? "text-emerald-500" : "text-rose-500",
+              tone: currentStreak.type === "win" ? "text-[#2dd4bf]" : "text-[#f59e0b]",
             },
             {
               title: "Best Day",
               value: bestDay ? formatMoney(bestDay.pnl) : "$0.00",
               icon: Activity,
-              tone: "text-amber-500",
+              tone: "text-[#fbbf24]",
             },
           ].map((item) => (
-            <Card key={item.title} className={cls("rounded-3xl border shadow-sm", cardTone)}>
+            <Card key={item.title} className={cls("rounded-3xl border", cardTone)}>
               <CardContent className="p-4">
                 <div className="mb-1.5 flex items-center justify-between">
-                  <span className={cls("text-xs", dark ? "text-slate-400" : "text-slate-500")}>{item.title}</span>
+                  <span className={cls("text-xs", dark ? "text-[#8e95a6]" : "text-[#64748b]")}>{item.title}</span>
                   <item.icon className={cls("h-4 w-4", item.tone)} />
                 </div>
                 <div className={cls("text-lg font-bold", item.tone)}>{item.value}</div>
@@ -914,9 +1064,9 @@ export default function TradingJournalCalendar() {
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[310px_minmax(0,1fr)]">
           <div className="space-y-5">
-            <Card className={cls("rounded-3xl border shadow-sm", cardTone)}>
+            <Card className={cls("rounded-3xl border", cardTone)}>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-[#8e95a6]">
                   {MONTHS[currentMonth.getMonth()]}
                 </CardTitle>
               </CardHeader>
@@ -924,49 +1074,51 @@ export default function TradingJournalCalendar() {
                 <div
                   className={cls(
                     "flex items-center justify-between rounded-2xl border p-3.5",
-                    monthlyPnl >= 0 ? "border-emerald-500/25 bg-emerald-500/10" : "border-rose-500/25 bg-rose-500/10"
+                    monthlyPnl >= 0
+                      ? "border-[#14b8a6]/30 bg-[#14b8a6]/10"
+                      : "border-[#f59e0b]/30 bg-[#f59e0b]/10"
                   )}
                 >
                   <div>
-                    <div className="text-[11px] text-slate-400">Monthly PnL</div>
-                    <div className={cls("text-xl font-bold", monthlyPnl >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                    <div className="text-[11px] text-[#8e95a6]">Monthly PnL</div>
+                    <div className={cls("text-xl font-bold", monthlyPnl >= 0 ? "text-[#2dd4bf]" : "text-[#fbbf24]")}>
                       {formatMoney(monthlyPnl)}
                     </div>
                   </div>
                   {monthlyPnl >= 0 ? (
-                    <TrendingUp className="h-5 w-5 text-emerald-500" />
+                    <TrendingUp className="h-5 w-5 text-[#2dd4bf]" />
                   ) : (
-                    <TrendingDown className="h-5 w-5 text-rose-500" />
+                    <TrendingDown className="h-5 w-5 text-[#fbbf24]" />
                   )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className={cls("rounded-2xl p-3", dark ? "bg-white/5" : "bg-slate-50")}>
-                    <div className="text-slate-400">Avg Win</div>
-                    <div className="mt-0.5 font-semibold text-emerald-500">+{formatMoney(stats.avgWin)}</div>
+                  <div className={cls("rounded-2xl border p-3", subSurface)}>
+                    <div className="text-[#8e95a6]">Avg Win</div>
+                    <div className="mt-0.5 font-semibold text-[#2dd4bf]">+{formatMoney(stats.avgWin)}</div>
                   </div>
-                  <div className={cls("rounded-2xl p-3", dark ? "bg-white/5" : "bg-slate-50")}>
-                    <div className="text-slate-400">Avg Loss</div>
-                    <div className="mt-0.5 font-semibold text-rose-500">-{formatMoney(stats.avgLoss)}</div>
+                  <div className={cls("rounded-2xl border p-3", subSurface)}>
+                    <div className="text-[#8e95a6]">Avg Loss</div>
+                    <div className="mt-0.5 font-semibold text-[#fbbf24]">-{formatMoney(stats.avgLoss)}</div>
                   </div>
-                  <div className={cls("rounded-2xl p-3", dark ? "bg-white/5" : "bg-slate-50")}>
-                    <div className="text-slate-400">W / L</div>
+                  <div className={cls("rounded-2xl border p-3", subSurface)}>
+                    <div className="text-[#8e95a6]">W / L</div>
                     <div className="mt-0.5 font-semibold">
-                      <span className="text-emerald-500">{stats.wins}</span> /{" "}
-                      <span className="text-rose-500">{stats.losses}</span>
+                      <span className="text-[#2dd4bf]">{stats.wins}</span> /{" "}
+                      <span className="text-[#fbbf24]">{stats.losses}</span>
                     </div>
                   </div>
-                  <div className={cls("rounded-2xl p-3", dark ? "bg-white/5" : "bg-slate-50")}>
-                    <div className="text-slate-400">Avg / Trade</div>
+                  <div className={cls("rounded-2xl border p-3", subSurface)}>
+                    <div className="text-[#8e95a6]">Avg / Trade</div>
                     <div className="mt-0.5 font-semibold">{formatMoney(stats.avg)}</div>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className={cls("rounded-3xl border shadow-sm", cardTone)}>
+            <Card className={cls("rounded-3xl border", cardTone)}>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-[#8e95a6]">
                   Sessions
                 </CardTitle>
               </CardHeader>
@@ -974,18 +1126,15 @@ export default function TradingJournalCalendar() {
                 {sessionStats.map((s) => (
                   <div
                     key={s.key}
-                    className={cls(
-                      "flex items-center justify-between rounded-2xl border px-3 py-2.5 text-xs",
-                      dark ? "border-white/10 bg-white/[0.02]" : "border-slate-200 bg-slate-50"
-                    )}
+                    className={cls("flex items-center justify-between rounded-2xl border px-3 py-2.5 text-xs", subSurface)}
                   >
                     <div>
                       <span className="font-semibold">{s.label}</span>
-                      <span className="ml-2 text-slate-400">
+                      <span className="ml-2 text-[#8e95a6]">
                         {s.count}t · {s.wr}%
                       </span>
                     </div>
-                    <span className={cls("font-bold", s.pnl >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                    <span className={cls("font-bold", s.pnl >= 0 ? "text-[#2dd4bf]" : "text-[#fbbf24]")}>
                       {s.pnl >= 0 ? "+" : ""}
                       {formatMoney(s.pnl)}
                     </span>
@@ -994,33 +1143,30 @@ export default function TradingJournalCalendar() {
               </CardContent>
             </Card>
 
-            <Card className={cls("rounded-3xl border shadow-sm", cardTone)}>
+            <Card className={cls("rounded-3xl border", cardTone)}>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-[#8e95a6]">
                   Strategies
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
                 {strategyStats.length === 0 ? (
-                  <div className="text-xs text-slate-400">—</div>
+                  <div className="text-xs text-[#8e95a6]">—</div>
                 ) : (
                   strategyStats.map((s) => {
                     const wr = s.count ? Math.round((s.wins / s.count) * 100) : 0;
                     return (
                       <div
                         key={s.name}
-                        className={cls(
-                          "flex items-center justify-between rounded-2xl border px-3 py-2.5 text-xs",
-                          dark ? "border-white/10 bg-white/[0.02]" : "border-slate-200 bg-slate-50"
-                        )}
+                        className={cls("flex items-center justify-between rounded-2xl border px-3 py-2.5 text-xs", subSurface)}
                       >
                         <div>
                           <div className="font-semibold">{s.name}</div>
-                          <div className="text-slate-400">
+                          <div className="text-[#8e95a6]">
                             {s.count}t · {wr}% WR
                           </div>
                         </div>
-                        <div className={cls("font-bold", s.pnl >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                        <div className={cls("font-bold", s.pnl >= 0 ? "text-[#2dd4bf]" : "text-[#fbbf24]")}>
                           {s.pnl >= 0 ? "+" : ""}
                           {formatMoney(s.pnl)}
                         </div>
@@ -1033,10 +1179,11 @@ export default function TradingJournalCalendar() {
           </div>
 
           <div className="space-y-5">
-            <Card className={cls("rounded-3xl border shadow-sm", cardTone)}>
+            <Card className={cls("rounded-3xl border", cardTone)}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                 <CardTitle className="text-lg font-bold">
-                  {MONTHS[currentMonth.getMonth()]} {currentMonth.getFullYear()}
+                  {MONTHS[currentMonth.getMonth()]}{" "}
+                  <span className="text-[#2dd4bf]">{currentMonth.getFullYear()}</span>
                 </CardTitle>
                 <div className="flex items-center gap-1.5">
                   <Button
@@ -1071,7 +1218,7 @@ export default function TradingJournalCalendar() {
               </CardHeader>
 
               <CardContent className="px-2.5 sm:px-6">
-                <div className="mb-2 grid grid-cols-7 gap-1 sm:gap-2 text-center text-[10px] sm:text-[11px] font-semibold uppercase text-slate-400">
+                <div className="mb-2 grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase text-[#8e95a6] sm:gap-2 sm:text-[11px]">
                   {DAYS.map((day) => (
                     <div key={day} className="truncate py-1">
                       {day}
@@ -1088,11 +1235,11 @@ export default function TradingJournalCalendar() {
                     const isToday = iso === toLocalIsoDate();
                     const level = getHeatLevel(dayPnl);
                     const heatStyle = {
-                      "strong-green": "bg-emerald-500/30 border-emerald-500/40",
-                      green: "bg-emerald-500/15 border-emerald-500/30",
-                      "strong-red": "bg-rose-500/30 border-rose-500/40",
-                      red: "bg-rose-500/15 border-rose-500/30",
-                      neutral: dark ? "bg-white/[0.02] border-white/10" : "bg-slate-50 border-slate-200",
+                      "strong-green": "bg-[#14b8a6]/30 border-[#2dd4bf]/50",
+                      green: "bg-[#14b8a6]/15 border-[#14b8a6]/35",
+                      "strong-red": "bg-[#f59e0b]/25 border-[#fbbf24]/50",
+                      red: "bg-[#f59e0b]/12 border-[#f59e0b]/35",
+                      neutral: dark ? "bg-[#191c24]/90 border-[#242936]" : "bg-[#f8f9fb] border-[#e5e9ef]",
                     }[level];
 
                     return (
@@ -1102,19 +1249,19 @@ export default function TradingJournalCalendar() {
                         type="button"
                         onClick={() => setSelectedDate(iso)}
                         className={cls(
-                          "min-h-[82px] sm:min-h-[96px] min-w-0 overflow-hidden rounded-xl sm:rounded-2xl border p-1.5 sm:p-2 text-left transition",
+                          "min-h-[82px] min-w-0 overflow-hidden rounded-xl border p-1.5 text-left transition sm:min-h-[96px] sm:rounded-2xl sm:p-2",
                           heatStyle,
                           !inMonth && "opacity-35",
-                          isSelected && "ring-2 ring-blue-500",
-                          dark ? "hover:bg-white/[0.07]" : "hover:bg-slate-100"
+                          isSelected && "ring-2 ring-[#2dd4bf]",
+                          dark ? "hover:border-[#343b4e] hover:bg-[#1e222c]" : "hover:bg-slate-100"
                         )}
                       >
                         <div className="mb-1 flex items-center justify-between gap-1">
-                          <span className={cls("text-xs font-bold leading-none", isToday && "text-blue-500")}>
+                          <span className={cls("text-xs font-bold leading-none", isToday && "text-[#2dd4bf]")}>
                             {date.getDate()}
                           </span>
                           {dayTrades.length > 0 && (
-                            <span className="shrink-0 rounded-full bg-black/15 px-1.5 py-0.5 text-[9px] font-semibold leading-none dark:bg-white/15">
+                            <span className="shrink-0 rounded-full bg-[#2dd4bf]/20 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-[#2dd4bf]">
                               {dayTrades.length}
                             </span>
                           )}
@@ -1124,10 +1271,10 @@ export default function TradingJournalCalendar() {
                           <div className="space-y-1">
                             <div
                               className={cls(
-                                "truncate rounded-md px-1 py-0.5 text-[10px] sm:text-[11px] font-bold leading-tight",
+                                "truncate rounded-md px-1 py-0.5 text-[10px] font-bold leading-tight sm:text-[11px]",
                                 dayPnl >= 0
-                                  ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                                  : "bg-rose-500/20 text-rose-600 dark:text-rose-400"
+                                  ? "bg-[#14b8a6]/20 text-[#2dd4bf]"
+                                  : "bg-[#f59e0b]/20 text-[#fbbf24]"
                               )}
                             >
                               <span className="sm:hidden">{formatCompactMoney(dayPnl)}</span>
@@ -1137,15 +1284,15 @@ export default function TradingJournalCalendar() {
                               </span>
                             </div>
 
-                            <div className="hidden sm:flex flex-wrap gap-1">
+                            <div className="hidden flex-wrap gap-1 sm:flex">
                               {dayTrades.slice(0, 2).map((trade) => (
                                 <span
                                   key={trade.id}
                                   className={cls(
                                     "max-w-full truncate rounded px-1 py-0.5 text-[9px] font-semibold",
                                     trade.direction === "buy"
-                                      ? "bg-blue-500/15 text-blue-400"
-                                      : "bg-amber-500/15 text-amber-500"
+                                      ? "bg-[#14b8a6]/15 text-[#5eead4]"
+                                      : "bg-[#f59e0b]/15 text-[#fbbf24]"
                                   )}
                                 >
                                   {trade.pair}
@@ -1153,12 +1300,12 @@ export default function TradingJournalCalendar() {
                               ))}
                             </div>
 
-                            <div className="truncate text-[9px] font-semibold text-slate-600 dark:text-slate-300 sm:hidden">
+                            <div className="truncate text-[9px] font-semibold text-[#9aa1b2] sm:hidden">
                               {dayTrades[0].pair}
                             </div>
                           </div>
                         ) : (
-                          <div className="pt-3 text-[10px] text-slate-400">—</div>
+                          <div className="pt-3 text-[10px] text-[#6b7080]">—</div>
                         )}
                       </motion.button>
                     );
@@ -1167,24 +1314,20 @@ export default function TradingJournalCalendar() {
               </CardContent>
             </Card>
 
-            <Card className={cls("rounded-3xl border shadow-sm", cardTone)}>
+            <Card className={cls("rounded-3xl border", cardTone)}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                 <div className="flex items-center gap-2">
-                  <CalendarIcon className="h-4 w-4 text-blue-500" />
+                  <CalendarIcon className="h-4 w-4 text-[#2dd4bf]" />
                   <CardTitle className="text-base font-bold">{selectedDate}</CardTitle>
                 </div>
-                <Button
-                  size="sm"
-                  onClick={() => openNewTrade(selectedDate)}
-                  className="h-8 rounded-xl bg-emerald-500 px-3 text-xs font-semibold text-slate-950 hover:bg-emerald-400"
-                >
+                <Button size="sm" onClick={() => openNewTrade(selectedDate)} className={cls("h-8 rounded-xl px-3 text-xs", primaryCta)}>
                   <Plus className="mr-1 h-3.5 w-3.5" /> Log Trade
                 </Button>
               </CardHeader>
 
               <CardContent>
                 {selectedTrades.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-700/40 py-6 text-center text-xs text-slate-400">
+                  <div className="rounded-2xl border border-dashed border-[#282d3b] py-6 text-center text-xs text-[#8e95a6]">
                     No trades on {selectedDate}
                   </div>
                 ) : (
@@ -1196,7 +1339,7 @@ export default function TradingJournalCalendar() {
                           key={trade.id}
                           className={cls(
                             "flex flex-col justify-between gap-3 rounded-2xl border p-3.5 md:flex-row md:items-center",
-                            dark ? "border-white/10 bg-white/[0.02]" : "border-slate-200 bg-slate-50"
+                            subSurface
                           )}
                         >
                           <div className="space-y-1">
@@ -1206,8 +1349,8 @@ export default function TradingJournalCalendar() {
                                 className={cls(
                                   "text-[10px]",
                                   trade.direction === "buy"
-                                    ? "bg-blue-500/20 text-blue-400 hover:bg-blue-500/20"
-                                    : "bg-amber-500/20 text-amber-500 hover:bg-amber-500/20"
+                                    ? "bg-[#14b8a6]/20 text-[#2dd4bf] hover:bg-[#14b8a6]/20"
+                                    : "bg-[#f59e0b]/20 text-[#fbbf24] hover:bg-[#f59e0b]/20"
                                 )}
                               >
                                 {trade.direction.toUpperCase()}
@@ -1217,7 +1360,7 @@ export default function TradingJournalCalendar() {
                               <Badge variant="outline" className="text-[10px]">{trade.grade}</Badge>
                             </div>
 
-                            <div className="flex flex-wrap gap-3 text-[11px] text-slate-400">
+                            <div className="flex flex-wrap gap-3 text-[11px] text-[#8e95a6]">
                               {trade.entry !== "" && <span>In: {trade.entry}</span>}
                               {trade.exit !== "" && <span>Out: {trade.exit}</span>}
                               {trade.lotSize !== "" && <span>Lot: {trade.lotSize}</span>}
@@ -1226,12 +1369,12 @@ export default function TradingJournalCalendar() {
                             </div>
 
                             {trade.note && (
-                              <p className={cls("text-xs", dark ? "text-slate-300" : "text-slate-700")}>{trade.note}</p>
+                              <p className={cls("text-xs", dark ? "text-[#cfd4e0]" : "text-slate-700")}>{trade.note}</p>
                             )}
                           </div>
 
                           <div className="flex items-center justify-between gap-2 md:justify-end">
-                            <div className={cls("text-base font-bold", pnlNum >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                            <div className={cls("text-base font-bold", pnlNum >= 0 ? "text-[#2dd4bf]" : "text-[#fbbf24]")}>
                               {pnlNum >= 0 ? "+" : ""}
                               {formatMoney(pnlNum)}
                             </div>
@@ -1244,7 +1387,7 @@ export default function TradingJournalCalendar() {
                                 title="Inspect screenshot"
                                 onClick={() => setInspectTrade(trade)}
                               >
-                                <Maximize2 className="h-3.5 w-3.5" />
+                                <Maximize2 className="h-3.5 w-3.5 text-[#2dd4bf]" />
                               </Button>
                             )}
                             <Button
@@ -1268,7 +1411,7 @@ export default function TradingJournalCalendar() {
                             <Button
                               size="icon"
                               variant="outline"
-                              className={cls("h-8 w-8 rounded-xl text-rose-500", fieldSurface)}
+                              className={cls("h-8 w-8 rounded-xl text-[#fbbf24]", fieldSurface)}
                               title="Delete"
                               onClick={() => deleteTrade(trade.id)}
                             >
@@ -1283,16 +1426,65 @@ export default function TradingJournalCalendar() {
               </CardContent>
             </Card>
 
-            <Card className={cls("rounded-3xl border shadow-sm", cardTone)}>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-base font-bold">Equity</CardTitle>
-                <Badge variant="secondary">{equitySeries.length}</Badge>
-              </CardHeader>
-              <CardContent>
-                <div className={cls("mb-2 text-xl font-bold", stats.pnl >= 0 ? "text-emerald-500" : "text-rose-500")}>
-                  {formatMoney(stats.pnl)}
+            <Card className={cls("rounded-3xl border", cardTone)}>
+              <CardHeader className="flex flex-col gap-3 space-y-0 pb-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-base font-bold">Trading Curve</CardTitle>
+                  <Badge className="rounded-full bg-[#14b8a6]/15 text-[#2dd4bf] hover:bg-[#14b8a6]/15">
+                    {curveData.points.length} trades
+                  </Badge>
                 </div>
-                <Sparkline points={equitySeries} positive={stats.pnl >= 0} dark={dark} />
+
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs text-[#8e95a6]">Start ($)</Label>
+                  <Input
+                    type="number"
+                    step="any"
+                    value={startingBalance}
+                    onChange={(e) => setStartingBalance(e.target.value)}
+                    className={cls("h-8 w-28 rounded-xl text-xs", fieldSurface)}
+                  />
+                </div>
+              </CardHeader>
+
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                  <div className={cls("rounded-2xl border p-3", subSurface)}>
+                    <div className="text-[11px] text-[#8e95a6]">Account Balance</div>
+                    <div
+                      className={cls(
+                        "mt-0.5 text-base font-bold",
+                        curveData.currentBalance >= Number(startingBalance || 0) ? "text-[#2dd4bf]" : "text-[#fbbf24]"
+                      )}
+                    >
+                      {formatMoney(curveData.currentBalance)}
+                    </div>
+                  </div>
+
+                  <div className={cls("rounded-2xl border p-3", subSurface)}>
+                    <div className="text-[11px] text-[#8e95a6]">Net PnL</div>
+                    <div className={cls("mt-0.5 text-base font-bold", stats.pnl >= 0 ? "text-[#2dd4bf]" : "text-[#fbbf24]")}>
+                      {stats.pnl >= 0 ? "+" : ""}
+                      {formatMoney(stats.pnl)}
+                    </div>
+                  </div>
+
+                  <div className={cls("col-span-2 rounded-2xl border p-3 sm:col-span-1", subSurface)}>
+                    <div className="text-[11px] text-[#8e95a6]">Max Drawdown</div>
+                    <div className="mt-0.5 text-base font-bold text-[#fbbf24]">
+                      -{formatMoney(curveData.maxDrawdownUsd)}{" "}
+                      <span className="text-xs font-normal text-[#8e95a6]">
+                        ({curveData.maxDrawdownPct.toFixed(1)}%)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <TradingCurveSvg
+                  points={curveData.points}
+                  startingBalance={startingBalance}
+                  dark={dark}
+                />
               </CardContent>
             </Card>
           </div>
@@ -1305,7 +1497,7 @@ export default function TradingJournalCalendar() {
             <>
               <DialogHeader className="flex flex-row items-center justify-between">
                 <DialogTitle className="text-lg font-bold">
-                  {inspectTrade.pair} · {inspectTrade.date}
+                  {inspectTrade.pair} · <span className="text-[#2dd4bf]">{inspectTrade.date}</span>
                 </DialogTitle>
                 <Button size="icon" variant="ghost" onClick={() => setInspectTrade(null)}>
                   <X className="h-4 w-4" />
@@ -1318,7 +1510,7 @@ export default function TradingJournalCalendar() {
                   className="max-h-[65vh] w-full rounded-2xl object-contain"
                 />
               )}
-              {inspectTrade.note && <p className="text-sm text-slate-300">{inspectTrade.note}</p>}
+              {inspectTrade.note && <p className="text-sm text-[#cfd4e0]">{inspectTrade.note}</p>}
             </>
           )}
         </DialogContent>
