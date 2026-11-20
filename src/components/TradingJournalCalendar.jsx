@@ -723,7 +723,7 @@ export default function TradingJournalCalendar() {
         >
           <div className="flex items-center gap-3">
             <span className="h-2.5 w-2.5 rounded-full bg-[#2dd4bf] shadow-[0_0_10px_#2dd4bf]" />
-            <h1 className="text-xl font-bold tracking-tight md:text-2xl">TradeZellah</h1>
+            <h1 className="text-xl font-bold tracking-tight md:text-2xl">Journal</h1>
             <Badge
               variant="secondary"
               className={cls(
