@@ -91,6 +91,19 @@ function formatMoney(value) {
   }).format(n);
 }
 
+function formatCompactMoney(value) {
+  const n = Number(value || 0);
+  const abs = Math.abs(n);
+  const sign = n < 0 ? "-" : n > 0 ? "+" : "";
+  const formatted =
+    abs >= 1000
+      ? `${(abs / 1000).toFixed(1)}k`
+      : Number.isInteger(abs)
+        ? String(abs)
+        : abs.toFixed(2).replace(/\.00$/, "");
+  return `${sign}$${formatted}`;
+}
+
 function cls(...parts) {
   return parts.filter(Boolean).join(" ");
 }
@@ -215,8 +228,8 @@ export default function TradingJournalCalendar() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(toLocalIsoDate());
   const [search, setSearch] = useState("");
-  const [outcomeFilter, setOutcomeFilter] = useState("all"); // all | win | loss
-  const [sessionFilter, setSessionFilter] = useState("all"); // all | asia | london | new-york
+  const [outcomeFilter, setOutcomeFilter] = useState("all");
+  const [sessionFilter, setSessionFilter] = useState("all");
   const [open, setOpen] = useState(false);
   const [inspectTrade, setInspectTrade] = useState(null);
   const [form, setForm] = useState(defaultForm());
@@ -548,8 +561,7 @@ export default function TradingJournalCalendar() {
 
   return (
     <div className={cls("min-h-screen w-full transition-colors", dark ? "bg-[#070a12] text-white" : "bg-slate-100 text-slate-900")}>
-      <div className="mx-auto max-w-7xl p-4 md:p-6">
-        {/* Compact Action Header */}
+      <div className="mx-auto max-w-7xl p-3 sm:p-4 md:p-6">
         <div
           className={cls(
             "mb-5 flex flex-col gap-4 rounded-3xl border p-4 shadow-lg md:flex-row md:items-center md:justify-between md:px-6",
@@ -849,7 +861,6 @@ export default function TradingJournalCalendar() {
           </div>
         </div>
 
-        {/* KPI Row */}
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {[
             {
@@ -901,9 +912,7 @@ export default function TradingJournalCalendar() {
           ))}
         </div>
 
-        {/* Workspace Grid */}
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[310px_minmax(0,1fr)]">
-          {/* Left Analytics Column */}
           <div className="space-y-5">
             <Card className={cls("rounded-3xl border shadow-sm", cardTone)}>
               <CardHeader className="pb-2">
@@ -1023,7 +1032,6 @@ export default function TradingJournalCalendar() {
             </Card>
           </div>
 
-          {/* Right Calendar + Day Log + Equity Curve */}
           <div className="space-y-5">
             <Card className={cls("rounded-3xl border shadow-sm", cardTone)}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
@@ -1062,16 +1070,16 @@ export default function TradingJournalCalendar() {
                 </div>
               </CardHeader>
 
-              <CardContent>
-                <div className="mb-2 grid grid-cols-7 gap-2 text-center text-[11px] font-semibold uppercase text-slate-400">
+              <CardContent className="px-2.5 sm:px-6">
+                <div className="mb-2 grid grid-cols-7 gap-1 sm:gap-2 text-center text-[10px] sm:text-[11px] font-semibold uppercase text-slate-400">
                   {DAYS.map((day) => (
-                    <div key={day} className="py-1">
+                    <div key={day} className="truncate py-1">
                       {day}
                     </div>
                   ))}
                 </div>
 
-                <div className="grid grid-cols-7 gap-2">
+                <div className="grid grid-cols-7 gap-1 sm:gap-2">
                   {monthCells.map(({ date, currentMonth: inMonth }) => {
                     const iso = toLocalIsoDate(date);
                     const dayTrades = byDate[iso] || [];
@@ -1091,40 +1099,50 @@ export default function TradingJournalCalendar() {
                       <motion.button
                         whileHover={{ y: -1 }}
                         key={iso}
+                        type="button"
                         onClick={() => setSelectedDate(iso)}
                         className={cls(
-                          "min-h-[96px] rounded-2xl border p-2 text-left transition",
+                          "min-h-[82px] sm:min-h-[96px] min-w-0 overflow-hidden rounded-xl sm:rounded-2xl border p-1.5 sm:p-2 text-left transition",
                           heatStyle,
                           !inMonth && "opacity-35",
                           isSelected && "ring-2 ring-blue-500",
                           dark ? "hover:bg-white/[0.07]" : "hover:bg-slate-100"
                         )}
                       >
-                        <div className="mb-1 flex items-center justify-between">
-                          <span className={cls("text-xs font-bold", isToday && "text-blue-500")}>{date.getDate()}</span>
+                        <div className="mb-1 flex items-center justify-between gap-1">
+                          <span className={cls("text-xs font-bold leading-none", isToday && "text-blue-500")}>
+                            {date.getDate()}
+                          </span>
                           {dayTrades.length > 0 && (
-                            <span className="rounded-full bg-black/20 px-1.5 py-0.5 text-[10px] font-semibold">
+                            <span className="shrink-0 rounded-full bg-black/15 px-1.5 py-0.5 text-[9px] font-semibold leading-none dark:bg-white/15">
                               {dayTrades.length}
                             </span>
                           )}
                         </div>
+
                         {dayTrades.length > 0 ? (
                           <div className="space-y-1">
                             <div
                               className={cls(
-                                "rounded-lg px-1.5 py-0.5 text-[11px] font-bold",
-                                dayPnl >= 0 ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400"
+                                "truncate rounded-md px-1 py-0.5 text-[10px] sm:text-[11px] font-bold leading-tight",
+                                dayPnl >= 0
+                                  ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                                  : "bg-rose-500/20 text-rose-600 dark:text-rose-400"
                               )}
                             >
-                              {dayPnl >= 0 ? "+" : ""}
-                              {formatMoney(dayPnl)}
+                              <span className="sm:hidden">{formatCompactMoney(dayPnl)}</span>
+                              <span className="hidden sm:inline">
+                                {dayPnl >= 0 ? "+" : ""}
+                                {formatMoney(dayPnl)}
+                              </span>
                             </div>
-                            <div className="flex flex-wrap gap-1">
+
+                            <div className="hidden sm:flex flex-wrap gap-1">
                               {dayTrades.slice(0, 2).map((trade) => (
                                 <span
                                   key={trade.id}
                                   className={cls(
-                                    "rounded px-1 py-0.5 text-[9px] font-semibold",
+                                    "max-w-full truncate rounded px-1 py-0.5 text-[9px] font-semibold",
                                     trade.direction === "buy"
                                       ? "bg-blue-500/15 text-blue-400"
                                       : "bg-amber-500/15 text-amber-500"
@@ -1134,9 +1152,13 @@ export default function TradingJournalCalendar() {
                                 </span>
                               ))}
                             </div>
+
+                            <div className="truncate text-[9px] font-semibold text-slate-600 dark:text-slate-300 sm:hidden">
+                              {dayTrades[0].pair}
+                            </div>
                           </div>
                         ) : (
-                          <div className="pt-4 text-[10px] text-slate-500">—</div>
+                          <div className="pt-3 text-[10px] text-slate-400">—</div>
                         )}
                       </motion.button>
                     );
@@ -1145,7 +1167,6 @@ export default function TradingJournalCalendar() {
               </CardContent>
             </Card>
 
-            {/* Selected Day Trades */}
             <Card className={cls("rounded-3xl border shadow-sm", cardTone)}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                 <div className="flex items-center gap-2">
@@ -1170,10 +1191,6 @@ export default function TradingJournalCalendar() {
                   <div className="space-y-2.5">
                     {selectedTrades.map((trade) => {
                       const pnlNum = Number(trade.pnl || 0);
-                      const rMultiple =
-                        trade.riskPercent && Number(trade.riskPercent) > 0 && stats.pnl !== 0
-                          ? null
-                          : null;
                       return (
                         <div
                           key={trade.id}
@@ -1266,7 +1283,6 @@ export default function TradingJournalCalendar() {
               </CardContent>
             </Card>
 
-            {/* Equity Curve */}
             <Card className={cls("rounded-3xl border shadow-sm", cardTone)}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-base font-bold">Equity</CardTitle>
@@ -1283,7 +1299,6 @@ export default function TradingJournalCalendar() {
         </div>
       </div>
 
-      {/* Screenshot & Trade Lightbox */}
       <Dialog open={Boolean(inspectTrade)} onOpenChange={(v) => !v && setInspectTrade(null)}>
         <DialogContent className={cls("rounded-3xl border sm:max-w-3xl", dialogSurface)}>
           {inspectTrade && (
